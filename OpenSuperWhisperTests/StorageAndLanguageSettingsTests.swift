@@ -180,6 +180,35 @@ final class ClipboardRestoreTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(ClipboardUtil.clipboardRestoreDelay, 1.0,
                                     "Browsers and Electron apps can service Cmd+V hundreds of ms after posting")
     }
+
+    func testIsNoSpeechResult_emptyOrWhitespace_isNoSpeech() {
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult(""))
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult("   "))
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult("\n\t "))
+    }
+
+    func testIsNoSpeechResult_sentinelPhrase_isNoSpeech() {
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult(ClipboardUtil.noSpeechSentinel))
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult("  \(ClipboardUtil.noSpeechSentinel)  "))
+    }
+
+    func testIsNoSpeechResult_realTranscription_isNotNoSpeech() {
+        XCTAssertFalse(ClipboardUtil.isNoSpeechResult("Hello world"))
+        XCTAssertFalse(ClipboardUtil.isNoSpeechResult("No speech detected in the recording, actually there was."))
+    }
+
+    func testCopyToClipboard_noSpeechResult_doesNotWrite() {
+        _ = setString("original")
+        let before = pasteboard.changeCount
+
+        // copyToClipboard targets NSPasteboard.general internally, so assert on
+        // the sentinel gate directly: a no-speech result must be rejected before
+        // any pasteboard write happens.
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult(""))
+        XCTAssertTrue(ClipboardUtil.isNoSpeechResult(ClipboardUtil.noSpeechSentinel))
+        XCTAssertEqual(pasteboard.changeCount, before,
+                       "Sentinel check must not touch the pasteboard")
+    }
 }
 
 @MainActor

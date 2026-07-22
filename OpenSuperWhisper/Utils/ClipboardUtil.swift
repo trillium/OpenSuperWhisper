@@ -8,11 +8,38 @@ class ClipboardUtil {
 
     /// Slow consumers (browsers, Electron apps) can service the synthesized
     /// Cmd+V long after the event is posted. Restoring the original clipboard
-    /// earlier makes them paste the old contents instead of the transcription.
+    /// before the target reads it makes them paste the old contents instead of
+    /// the transcription. AppKit paste is a *read* of the pasteboard, so there
+    /// is no public signal that the paste was consumed (reads never advance
+    /// `changeCount`). We therefore wait a generous window before restoring and
+    /// abort the restore the instant anyone else writes to the pasteboard, so
+    /// we never clobber newer clipboard contents.
     static let clipboardRestoreDelay: TimeInterval = 1.5
+
+    /// Interval between `changeCount` polls while waiting to restore.
+    static let clipboardRestorePollInterval: TimeInterval = 0.05
+
+    /// Human-readable no-speech sentinel surfaced by the transcription pipeline
+    /// (see `ContentView` / `IndicatorWindow`). The engines themselves return an
+    /// empty string for silence; both cases are treated as "nothing to inject".
+    static let noSpeechSentinel = "No speech detected"
+
+    /// Serial queue used to wait for, and restore, the clipboard off the main
+    /// thread so a slow paste consumer never blocks the UI.
+    private static let restoreQueue = DispatchQueue(label: "com.opensuperwhisper.clipboard-restore",
+                                                    qos: .utility)
+
+    /// True when `text` carries no dictation and must not be injected: an empty
+    /// or whitespace-only result, or the no-speech sentinel phrase.
+    static func isNoSpeechResult(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == noSpeechSentinel
+    }
 
     /// Copies text to clipboard without pasting or restoring
     static func copyToClipboard(_ text: String) {
+        // Fail-closed: never write a no-speech result to the clipboard.
+        guard !isNoSpeechResult(text) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(text, forType: .string)
@@ -20,6 +47,9 @@ class ClipboardUtil {
 
     /// Pastes text and keeps it in clipboard (does not restore original clipboard)
     static func insertTextAndKeepInClipboard(_ text: String) {
+        // Fail-closed: no clipboard write and no synthesized keystroke for a
+        // no-speech result.
+        guard !isNoSpeechResult(text) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(text, forType: .string)
@@ -28,6 +58,10 @@ class ClipboardUtil {
 
     /// Pastes text and restores original clipboard (legacy behavior)
     static func insertText(_ text: String) {
+        // Fail-closed: no clipboard write and no synthesized keystroke for a
+        // no-speech result.
+        guard !isNoSpeechResult(text) else { return }
+
         let pasteboard = NSPasteboard.general
 
         // Save current pasteboard contents
@@ -42,13 +76,29 @@ class ClipboardUtil {
         simulatePaste()
 
         // Restore original contents only after the target app had a chance to
-        // process the paste, and only if the pasteboard still holds our text:
-        // a different changeCount means the user (or another app) took over
-        // the clipboard and restoring would clobber their data.
-        if let contents = savedContents {
-            DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
-                restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
+        // process the paste. We can't observe the paste itself (it's a read),
+        // so we poll off the main thread until either someone else writes to the
+        // pasteboard — in which case we abort, leaving their newer data intact —
+        // or the generous window elapses and the clipboard still holds our text.
+        guard let contents = savedContents else { return }
+        scheduleRestore(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
+    }
+
+    /// Waits — off the main thread — for a slow paste consumer, then restores the
+    /// original clipboard. Polls `changeCount`: any advance means another writer
+    /// took the pasteboard, so we abort rather than clobber it. If the window
+    /// elapses with our text still in place, we restore the saved contents.
+    private static func scheduleRestore(_ contents: PasteboardContents,
+                                        expectedChangeCount: Int,
+                                        pasteboard: NSPasteboard) {
+        restoreQueue.async {
+            let deadline = Date().addingTimeInterval(clipboardRestoreDelay)
+            while Date() < deadline {
+                // Someone else wrote to the clipboard — leave their content alone.
+                if pasteboard.changeCount != expectedChangeCount { return }
+                Thread.sleep(forTimeInterval: clipboardRestorePollInterval)
             }
+            restoreIfUnchanged(contents, expectedChangeCount: expectedChangeCount, pasteboard: pasteboard)
         }
     }
 
