@@ -10,17 +10,17 @@ class AudioRecorder: NSObject, ObservableObject {
     @Published var currentlyPlayingURL: URL?
     @Published var canRecord = false
     @Published var isConnecting = false
-    
+
     static let minimumRecordingDuration: TimeInterval = 1.0
     static let temporaryFileMaxAge: TimeInterval = 24 * 60 * 60
     /// Extra audio captured after a stop request, so the tail of the last word
     /// (released together with the hotkey) is not clipped.
     static let stopTailDuration: TimeInterval = 0.25
-    
+
     // Serializes all recording state mutations (start/stop/cancel/connection monitoring)
     // so a stop arriving right after a start can never overtake it.
     private let workQueue = DispatchQueue(label: "com.opensuperwhisper.audiorecorder")
-    
+
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
     private var notificationSound: NSSound?
@@ -36,14 +36,14 @@ class AudioRecorder: NSObject, ObservableObject {
     // MARK: - Singleton Instance
 
     static let shared = AudioRecorder()
-    
+
     static var temporaryRecordingsDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
     }
-    
+
     override private init() {
         temporaryDirectory = Self.temporaryRecordingsDirectory
-        
+
         super.init()
         createTemporaryDirectoryIfNeeded()
         workQueue.async { [temporaryDirectory] in
@@ -51,7 +51,7 @@ class AudioRecorder: NSObject, ObservableObject {
         }
         setup()
     }
-    
+
     deinit {
         if let observer = notificationObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -60,10 +60,10 @@ class AudioRecorder: NSObject, ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
     }
-    
+
     private func setup() {
         updateCanRecordStatus()
-        
+
         notificationObserver = NotificationCenter.default.addObserver(
             forName: .AVCaptureDeviceWasConnected,
             object: nil,
@@ -71,7 +71,7 @@ class AudioRecorder: NSObject, ObservableObject {
         ) { [weak self] _ in
             self?.updateCanRecordStatus()
         }
-        
+
         NotificationCenter.default.addObserver(
             forName: .AVCaptureDeviceWasDisconnected,
             object: nil,
@@ -79,7 +79,7 @@ class AudioRecorder: NSObject, ObservableObject {
         ) { [weak self] _ in
             self?.updateCanRecordStatus()
         }
-        
+
         microphoneChangeObserver = NotificationCenter.default.addObserver(
             forName: .microphoneDidChange,
             object: nil,
@@ -88,11 +88,11 @@ class AudioRecorder: NSObject, ObservableObject {
             self?.updateCanRecordStatus()
         }
     }
-    
+
     private func updateCanRecordStatus() {
         canRecord = MicrophoneService.shared.getActiveMicrophone() != nil
     }
-    
+
     private func createTemporaryDirectoryIfNeeded() {
         do {
             try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
@@ -100,14 +100,14 @@ class AudioRecorder: NSObject, ObservableObject {
             print("Failed to create temporary recordings directory: \(error)")
         }
     }
-    
+
     static func cleanupOldTemporaryFiles(in directory: URL, olderThan maxAge: TimeInterval) {
         let fileManager = FileManager.default
         guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]
         ) else { return }
-        
+
         let cutoff = Date().addingTimeInterval(-maxAge)
         for file in files {
             let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
@@ -116,7 +116,7 @@ class AudioRecorder: NSObject, ObservableObject {
             }
         }
     }
-    
+
     // Loaded once: decoding the mp3 from disk takes ~15 ms on the main thread,
     // which drops frames of the indicator appear animation on every hotkey press.
     private static let cachedNotificationSound: NSSound? = {
@@ -164,7 +164,7 @@ class AudioRecorder: NSObject, ObservableObject {
         sound.play()
         stopSound = sound
     }
-    
+
     func startRecording() {
         // Everything below costs CoreAudio HAL round-trips (device queries,
         // AudioQueue start for the notification sound) — 20-35 ms that used to
@@ -176,29 +176,29 @@ class AudioRecorder: NSObject, ObservableObject {
                 print("Cannot start recording - no audio input available")
                 return
             }
-            
+
             if playSound {
                 self.playNotificationSound()
             }
-            
+
             let requiresConnection = MicrophoneService.shared.isActiveMicrophoneRequiresConnection()
             self.updateRecordingState(isRecording: false, isConnecting: requiresConnection)
             self.performStart(activeMic: activeMic, monitorConnection: requiresConnection)
         }
     }
-    
+
     private func performStart(activeMic: MicrophoneService.AudioDevice?, monitorConnection: Bool) {
         if audioRecorder != nil {
             print("stop recording while recording")
             _ = performStop(discard: true)
         }
-        
+
         let timestamp = Int(Date().timeIntervalSince1970)
         let fileURL = temporaryDirectory.appendingPathComponent("\(timestamp).wav")
         currentRecordingURL = fileURL
-        
+
         print("start record file to \(fileURL)")
-        
+
         var channelCount = 1
         #if os(macOS)
         if let activeMic = activeMic {
@@ -207,7 +207,7 @@ class AudioRecorder: NSObject, ObservableObject {
             print("Recording with \(channelCount) input channel(s) from \(activeMic.displayName)")
         }
         #endif
-        
+
         // 16-bit integer PCM: half the disk/IO of Float32 with no quality loss
         // for speech recognition (whisper consumes 16 kHz mono anyway).
         let settings: [String: Any] = [
@@ -217,7 +217,7 @@ class AudioRecorder: NSObject, ObservableObject {
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false
         ]
-        
+
         do {
             audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder?.delegate = self
@@ -236,7 +236,7 @@ class AudioRecorder: NSObject, ObservableObject {
             updateRecordingState(isRecording: false, isConnecting: false)
         }
     }
-    
+
     func stopRecording() async -> URL? {
         await withCheckedContinuation { continuation in
             workQueue.async {
@@ -244,7 +244,7 @@ class AudioRecorder: NSObject, ObservableObject {
                     continuation.resume(returning: self.performStop(discard: false))
                     return
                 }
-                
+
                 // Detach the session immediately (UI state, connection monitoring),
                 // then keep capturing a short tail before actually stopping, so the
                 // end of the last word released together with the hotkey survives.
@@ -252,7 +252,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 self.currentRecordingURL = nil
                 self.stopConnectionMonitoring()
                 self.updateRecordingState(isRecording: false, isConnecting: false)
-                
+
                 self.workQueue.asyncAfter(deadline: .now() + Self.stopTailDuration) {
                     let recordedDuration = recorder.currentTime
                     recorder.stop()
@@ -261,7 +261,7 @@ class AudioRecorder: NSObject, ObservableObject {
                     if self.audioRecorder == nil {
                         self.restoreSystemDefaultInputIfNeeded()
                     }
-                    
+
                     if recordedDuration < Self.minimumRecordingDuration {
                         try? FileManager.default.removeItem(at: url)
                         continuation.resume(returning: nil)
@@ -272,13 +272,13 @@ class AudioRecorder: NSObject, ObservableObject {
             }
         }
     }
-    
+
     func cancelRecording() {
         workQueue.sync {
             _ = performStop(discard: true)
         }
     }
-    
+
     private func performStop(discard: Bool) -> URL? {
         let recordedDuration = audioRecorder?.currentTime ?? 0
         audioRecorder?.stop()
@@ -286,10 +286,10 @@ class AudioRecorder: NSObject, ObservableObject {
         stopConnectionMonitoring()
         restoreSystemDefaultInputIfNeeded()
         updateRecordingState(isRecording: false, isConnecting: false)
-        
+
         guard let url = currentRecordingURL else { return nil }
         currentRecordingURL = nil
-        
+
         if discard || recordedDuration < Self.minimumRecordingDuration {
             try? FileManager.default.removeItem(at: url)
             return nil
@@ -299,25 +299,25 @@ class AudioRecorder: NSObject, ObservableObject {
         }
         return url
     }
-    
+
     #if os(macOS)
     private func switchSystemDefaultInput(to device: MicrophoneService.AudioDevice) {
         guard let targetID = MicrophoneService.shared.getCoreAudioDeviceID(for: device) else { return }
         recordingDeviceID = targetID
-        
+
         let currentDefault = MicrophoneService.shared.getCurrentSystemDefaultInputDevice()
         guard currentDefault != targetID else { return }
-        
+
         if MicrophoneService.shared.setSystemDefaultInputDevice(targetID) {
             previousDefaultInputDeviceID = currentDefault
             print("Set system default input to: \(device.displayName)")
         }
     }
-    
+
     private func restoreSystemDefaultInputIfNeeded() {
         guard let previous = previousDefaultInputDeviceID else { return }
         previousDefaultInputDeviceID = nil
-        
+
         // Restore only if the default is still the device we set,
         // so a manual change made by the user during recording is kept.
         if MicrophoneService.shared.getCurrentSystemDefaultInputDevice() == recordingDeviceID {
@@ -328,7 +328,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private func switchSystemDefaultInput(to device: MicrophoneService.AudioDevice) {}
     private func restoreSystemDefaultInputIfNeeded() {}
     #endif
-    
+
     func moveTemporaryRecording(from tempURL: URL, to finalURL: URL) throws {
 
         let directory = finalURL.deletingLastPathComponent()
@@ -341,11 +341,11 @@ class AudioRecorder: NSObject, ObservableObject {
         }
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
     }
-    
+
     func playRecording(url: URL) {
         // Stop current playback if any
         stopPlaying()
-        
+
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: url)
             audioPlayer?.delegate = self
@@ -358,39 +358,39 @@ class AudioRecorder: NSObject, ObservableObject {
             currentlyPlayingURL = nil
         }
     }
-    
+
     func stopPlaying() {
         audioPlayer?.stop()
         audioPlayer = nil
         isPlaying = false
         currentlyPlayingURL = nil
     }
-    
+
     private func updateRecordingState(isRecording: Bool, isConnecting: Bool) {
         DispatchQueue.main.async {
             self.isRecording = isRecording
             self.isConnecting = isConnecting
         }
     }
-    
+
     private func startConnectionMonitoring() {
         stopConnectionMonitoring()
-        
+
         let timer = DispatchSource.makeTimerSource(queue: workQueue)
         timer.schedule(deadline: .now() + 0.05, repeating: 0.05)
         let initialFileSize: Int64 = 4096
         var growthCount = 0
-        
+
         timer.setEventHandler { [weak self] in
             guard let self = self, let _ = self.audioRecorder, let url = self.currentRecordingURL else { return }
-            
+
             let currentFileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
             let totalGrowth = currentFileSize - initialFileSize
-            
+
             if totalGrowth > 8000 {
                 growthCount += 1
             }
-            
+
             if growthCount >= 2 {
                 self.stopConnectionMonitoring()
                 self.updateRecordingState(isRecording: true, isConnecting: false)
@@ -399,7 +399,7 @@ class AudioRecorder: NSObject, ObservableObject {
         connectionCheckTimer = timer
         timer.resume()
     }
-    
+
     private func stopConnectionMonitoring() {
         connectionCheckTimer?.cancel()
         connectionCheckTimer = nil
