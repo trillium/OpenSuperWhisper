@@ -92,7 +92,10 @@ final class AppPreferences {
     
     @UserDefault(key: "playSoundOnRecordStart", defaultValue: false)
     var playSoundOnRecordStart: Bool
-    
+
+    @UserDefault(key: "playSoundOnRecordStop", defaultValue: true)
+    var playSoundOnRecordStop: Bool
+
     @UserDefault(key: "hasCompletedOnboarding", defaultValue: false)
     var hasCompletedOnboarding: Bool
     

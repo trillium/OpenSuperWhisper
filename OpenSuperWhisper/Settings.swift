@@ -135,7 +135,13 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.playSoundOnRecordStart = playSoundOnRecordStart
         }
     }
-    
+
+    @Published var playSoundOnRecordStop: Bool {
+        didSet {
+            AppPreferences.shared.playSoundOnRecordStop = playSoundOnRecordStop
+        }
+    }
+
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
@@ -216,6 +222,7 @@ class SettingsViewModel: ObservableObject {
         self.beamSize = prefs.beamSize
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
+        self.playSoundOnRecordStop = prefs.playSoundOnRecordStop
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.mouseButtonHotkey = MouseButton(rawValue: prefs.mouseButtonHotkey) ?? .none
@@ -1375,7 +1382,17 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .help("Play a notification sound when recording begins")
                         }
-                        
+
+                        HStack {
+                            Text("Play sound when recording stops")
+                                .font(.subheadline)
+                            Spacer()
+                            Toggle("", isOn: $viewModel.playSoundOnRecordStop)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                                .help("Play a sound when recording ends")
+                        }
+
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Cancel without confirmation")

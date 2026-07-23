@@ -24,6 +24,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
     private var notificationSound: NSSound?
+    private var stopSound: NSSound?
     private let temporaryDirectory: URL
     private var currentRecordingURL: URL?
     private var notificationObserver: Any?
@@ -127,7 +128,19 @@ class AudioRecorder: NSObject, ObservableObject {
         sound.volume = 0.3
         return sound
     }()
-    
+
+    // Mirror of cachedNotificationSound for the recording-stop chime, cached
+    // once for the same reason: mp3 decode on the main thread drops frames.
+    private static let cachedStopSound: NSSound? = {
+        guard let soundURL = Bundle.main.url(forResource: "notification_stop", withExtension: "mp3"),
+              let sound = NSSound(contentsOf: soundURL, byReference: false) else {
+            print("Failed to load stop sound file")
+            return nil
+        }
+        sound.volume = 0.3
+        return sound
+    }()
+
     private func playNotificationSound() {
         guard let sound = Self.cachedNotificationSound else {
             NSSound.beep()
@@ -138,6 +151,18 @@ class AudioRecorder: NSObject, ObservableObject {
         }
         sound.play()
         notificationSound = sound
+    }
+
+    private func playStopSound() {
+        guard let sound = Self.cachedStopSound else {
+            NSSound.beep()
+            return
+        }
+        if sound.isPlaying {
+            sound.stop()
+        }
+        sound.play()
+        stopSound = sound
     }
     
     func startRecording() {
@@ -268,6 +293,9 @@ class AudioRecorder: NSObject, ObservableObject {
         if discard || recordedDuration < Self.minimumRecordingDuration {
             try? FileManager.default.removeItem(at: url)
             return nil
+        }
+        if AppPreferences.shared.playSoundOnRecordStop {
+            playStopSound()
         }
         return url
     }
