@@ -11,6 +11,7 @@ class MicrophoneService: ObservableObject {
     @Published var currentMicrophone: AudioDevice?
     
     private var deviceChangeObserver: Any?
+    private var reloadObserver: Any?
     private var timer: Timer?
     
     struct AudioDevice: Identifiable, Equatable, Codable {
@@ -39,6 +40,9 @@ class MicrophoneService: ObservableObject {
         if let observer = deviceChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = reloadObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
         timer?.invalidate()
     }
     
@@ -51,7 +55,7 @@ class MicrophoneService: ObservableObject {
             self?.refreshAvailableMicrophones()
             self?.updateCurrentMicrophone()
         }
-        
+
         NotificationCenter.default.addObserver(
             forName: .AVCaptureDeviceWasDisconnected,
             object: nil,
@@ -59,6 +63,13 @@ class MicrophoneService: ObservableObject {
         ) { [weak self] _ in
             self?.refreshAvailableMicrophones()
             self?.updateCurrentMicrophone()
+        }
+
+        reloadObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("ru.starmel.OpenSuperWhisper.reloadMicrophone"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reloadSelectedMicrophoneFromDefaults()
         }
     }
     
@@ -271,7 +282,24 @@ class MicrophoneService: ObservableObject {
         }
         selectedMicrophone = device
     }
-    
+
+    private func reloadSelectedMicrophoneFromDefaults() {
+        let previous = selectedMicrophone
+        if let data = AppPreferences.shared.selectedMicrophoneData,
+           let device = try? JSONDecoder().decode(AudioDevice.self, from: data) {
+            selectedMicrophone = device
+        } else {
+            selectedMicrophone = nil
+        }
+        refreshAvailableMicrophones()
+        updateCurrentMicrophone()
+        if selectedMicrophone != previous {
+            NotificationCenter.default.post(
+                name: .microphoneDidChange, object: nil,
+                userInfo: selectedMicrophone.map { ["device": $0] } ?? [:])
+        }
+    }
+
     func resetToDefault() {
         selectedMicrophone = nil
         AppPreferences.shared.selectedMicrophoneData = nil
