@@ -21,7 +21,7 @@ class SettingsViewModel: ObservableObject {
             }
         }
     }
-    
+
     @Published var fluidAudioModelVersion: String {
         didSet {
             AppPreferences.shared.fluidAudioModelVersion = fluidAudioModelVersion
@@ -34,11 +34,11 @@ class SettingsViewModel: ObservableObject {
             resetLanguageIfUnsupported()
         }
     }
-    
+
     var supportedLanguages: [String] {
         LanguageUtil.supportedLanguages(engine: selectedEngine, fluidAudioModelVersion: fluidAudioModelVersion)
     }
-    
+
     private func resetLanguageIfUnsupported() {
         if !supportedLanguages.contains(selectedLanguage) {
             selectedLanguage = LanguageUtil.fallbackLanguage(engine: selectedEngine)
@@ -46,7 +46,7 @@ class SettingsViewModel: ObservableObject {
             NotificationCenter.default.post(name: .appPreferencesLanguageChanged, object: nil)
         }
     }
-    
+
     @Published var selectedModelURL: URL? {
         didSet {
             if let url = selectedModelURL {
@@ -67,14 +67,14 @@ class SettingsViewModel: ObservableObject {
     }
 
     @Published var availableModels: [URL] = []
-    
+
     @Published var downloadableModels: [SettingsDownloadableModel] = []
     @Published var downloadableFluidAudioModels: [SettingsFluidAudioModel] = []
     @Published var isDownloading: Bool = false
     @Published var downloadProgress: Double = 0.0
     @Published var downloadingModelName: String?
     private var downloadTask: Task<Void, Error>?
-    
+
     @Published var selectedLanguage: String {
         didSet {
             AppPreferences.shared.whisperLanguage = selectedLanguage
@@ -93,7 +93,7 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.showTimestamps = showTimestamps
         }
     }
-    
+
     @Published var temperature: Double {
         didSet {
             AppPreferences.shared.temperature = temperature
@@ -129,19 +129,25 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.debugMode = debugMode
         }
     }
-    
+
     @Published var playSoundOnRecordStart: Bool {
         didSet {
             AppPreferences.shared.playSoundOnRecordStart = playSoundOnRecordStart
         }
     }
-    
+
+    @Published var playSoundOnRecordStop: Bool {
+        didSet {
+            AppPreferences.shared.playSoundOnRecordStop = playSoundOnRecordStop
+        }
+    }
+
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
         }
     }
-    
+
     @Published var modifierOnlyHotkey: ModifierKey {
         didSet {
             AppPreferences.shared.modifierOnlyHotkey = modifierOnlyHotkey.rawValue
@@ -158,7 +164,7 @@ class SettingsViewModel: ObservableObject {
             NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
         }
     }
-    
+
     @Published var holdToRecord: Bool {
         didSet {
             AppPreferences.shared.holdToRecord = holdToRecord
@@ -171,7 +177,7 @@ class SettingsViewModel: ObservableObject {
             NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
         }
     }
-    
+
     @Published var escCancelWithoutConfirmation: Bool {
         didSet {
             AppPreferences.shared.escCancelWithoutConfirmation = escCancelWithoutConfirmation
@@ -183,7 +189,7 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.startHiddenInMenuBar = startHiddenInMenuBar
         }
     }
-    
+
     @Published var addSpaceAfterSentence: Bool {
         didSet {
             AppPreferences.shared.addSpaceAfterSentence = addSpaceAfterSentence
@@ -216,6 +222,7 @@ class SettingsViewModel: ObservableObject {
         self.beamSize = prefs.beamSize
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
+        self.playSoundOnRecordStop = prefs.playSoundOnRecordStop
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.mouseButtonHotkey = MouseButton(rawValue: prefs.mouseButtonHotkey) ?? .none
@@ -233,7 +240,7 @@ class SettingsViewModel: ObservableObject {
         loadAvailableModels()
         initializeDownloadableModels()
         initializeFluidAudioModels()
-        
+
         if !supportedLanguages.contains(selectedLanguage) {
             let fallback = LanguageUtil.fallbackLanguage(engine: selectedEngine)
             selectedLanguage = fallback
@@ -241,7 +248,7 @@ class SettingsViewModel: ObservableObject {
             NotificationCenter.default.post(name: .appPreferencesLanguageChanged, object: nil)
         }
     }
-    
+
     func initializeFluidAudioModels() {
         downloadableFluidAudioModels = SettingsFluidAudioModels.availableModels.map { model in
             var updatedModel = model
@@ -249,18 +256,18 @@ class SettingsViewModel: ObservableObject {
             return updatedModel
         }
     }
-    
+
     func isFluidAudioModelDownloaded(version: String) -> Bool {
         let asrVersion: AsrModelVersion = version == "v2" ? .v2 : .v3
-        
+
         // Используем правильный путь к кэшу согласно документации:
         // ~/Library/Application Support/FluidAudio/Models/<version-folder>/
         let cacheDirectory = AsrModels.defaultCacheDirectory(for: asrVersion)
-        
+
         // Проверяем наличие всех необходимых файлов модели
         return AsrModels.modelsExist(at: cacheDirectory, version: asrVersion)
     }
-    
+
     func initializeDownloadableModels() {
         let modelManager = WhisperModelManager.shared
         downloadableModels = SettingsDownloadableModels.availableModels.map { model in
@@ -270,7 +277,7 @@ class SettingsViewModel: ObservableObject {
             return updatedModel
         }
     }
-    
+
     func loadAvailableModels() {
         availableModels = WhisperModelManager.shared.getAvailableModels()
         if selectedModelURL == nil {
@@ -278,25 +285,25 @@ class SettingsViewModel: ObservableObject {
         }
         initializeDownloadableModels()
     }
-    
+
     @MainActor
     func downloadModel(_ model: SettingsDownloadableModel) async throws {
         guard !isDownloading else { return }
         try DiskSpaceUtil.ensureEnoughFreeSpaceForModelDownload()
-        
+
         isDownloading = true
         downloadingModelName = model.name
         downloadProgress = 0.0
-        
+
         downloadTask = Task {
             do {
                 let filename = model.filename
-                
+
                 try await WhisperModelManager.shared.downloadModel(url: model.url, name: filename) { [weak self] progress in
                     Task { @MainActor [weak self] in
                         guard let self = self, !Task.isCancelled else { return }
                         guard let task = self.downloadTask, !task.isCancelled else { return }
-                        
+
                         self.downloadProgress = progress
                         if let index = self.downloadableModels.firstIndex(where: { $0.name == model.name }) {
                             self.downloadableModels[index].downloadProgress = progress
@@ -306,7 +313,7 @@ class SettingsViewModel: ObservableObject {
                         }
                     }
                 }
-                
+
                 guard !Task.isCancelled else {
                     await MainActor.run {
                         self.isDownloading = false
@@ -318,7 +325,7 @@ class SettingsViewModel: ObservableObject {
                     }
                     return
                 }
-                
+
                 await MainActor.run {
                     if let index = downloadableModels.firstIndex(where: { $0.name == model.name }) {
                         downloadableModels[index].isDownloaded = true
@@ -330,7 +337,7 @@ class SettingsViewModel: ObservableObject {
                     isDownloading = false
                     downloadingModelName = nil
                     downloadProgress = 0.0
-                    
+
                     Task { @MainActor in
                         TranscriptionService.shared.reloadModel(with: modelPath)
                     }
@@ -356,10 +363,10 @@ class SettingsViewModel: ObservableObject {
                 throw error
             }
         }
-        
+
         try await downloadTask?.value
     }
-    
+
     func cancelDownload() {
         downloadTask?.cancel()
         if let modelName = downloadingModelName {
@@ -379,26 +386,26 @@ class SettingsViewModel: ObservableObject {
         downloadingModelName = nil
         downloadProgress = 0.0
     }
-    
+
     @MainActor
     func downloadFluidAudioModel(_ model: SettingsFluidAudioModel) async throws {
         guard !isDownloading else { return }
         try DiskSpaceUtil.ensureEnoughFreeSpaceForModelDownload()
-        
+
         isDownloading = true
         downloadingModelName = model.name
         downloadProgress = 0.0
-        
+
         if let index = downloadableFluidAudioModels.firstIndex(where: { $0.id == model.id }) {
             downloadableFluidAudioModels[index].downloadProgress = 0.0
         }
-        
+
         var wasCancelled = false
-        
+
         downloadTask = Task {
             do {
                 let version: AsrModelVersion = model.version == "v2" ? .v2 : .v3
-                
+
                 guard !Task.isCancelled else {
                     await MainActor.run {
                         self.isDownloading = false
@@ -410,7 +417,7 @@ class SettingsViewModel: ObservableObject {
                     }
                     throw CancellationError()
                 }
-                
+
                 let modelId = model.id
                 let models = try await AsrModels.downloadAndLoad(version: version) { [weak self] progress in
                     print("[ParakeetProgress] fraction=\(progress.fractionCompleted) phase=\(progress.phase)")
@@ -423,7 +430,7 @@ class SettingsViewModel: ObservableObject {
                         }
                     }
                 }
-                
+
                 guard !Task.isCancelled else {
                     await MainActor.run {
                         self.isDownloading = false
@@ -435,10 +442,10 @@ class SettingsViewModel: ObservableObject {
                     }
                     throw CancellationError()
                 }
-                
+
                 let manager = AsrManager(config: .default)
                 try await manager.loadModels(models)
-                
+
                 await MainActor.run {
                     if let index = downloadableFluidAudioModels.firstIndex(where: { $0.id == model.id }) {
                         downloadableFluidAudioModels[index].isDownloaded = true
@@ -448,7 +455,7 @@ class SettingsViewModel: ObservableObject {
                     isDownloading = false
                     downloadingModelName = nil
                     downloadProgress = 1.0
-                    
+
                     Task { @MainActor in
                         TranscriptionService.shared.reloadEngine()
                     }
@@ -489,7 +496,7 @@ class SettingsViewModel: ObservableObject {
                 }
             }
         }
-        
+
         // Handle cancellation gracefully - don't throw if cancelled
         do {
             try await downloadTask?.value
@@ -503,7 +510,7 @@ class SettingsViewModel: ObservableObject {
             }
         }
     }
-    
+
     @MainActor
     func downloadFluidAudioModel() async throws {
         let versionString = AppPreferences.shared.fluidAudioModelVersion
@@ -618,7 +625,7 @@ func huggingFaceOwner(fromPageURL url: URL) -> String? {
 
 struct Settings {
     static let asianLanguages: Set<String> = ["zh", "ja", "ko"]
-    
+
     var selectedLanguage: String
     var suppressBlankAudio: Bool
     var showTimestamps: Bool
@@ -628,15 +635,15 @@ struct Settings {
     var useBeamSearch: Bool
     var beamSize: Int
     var useAsianAutocorrect: Bool
-    
+
     var isAsianLanguage: Bool {
         Settings.asianLanguages.contains(selectedLanguage)
     }
-    
+
     var shouldApplyAsianAutocorrect: Bool {
         isAsianLanguage && useAsianAutocorrect
     }
-    
+
     init() {
         let prefs = AppPreferences.shared
         self.selectedLanguage = prefs.whisperLanguage
@@ -658,14 +665,14 @@ struct SettingsView: View {
     @State private var isRecordingNewShortcut = false
     @State private var selectedTab = 0
     @State private var previousModelURL: URL?
-    
+
     private var sheetSize: CGSize {
         let visibleFrame = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
         let width = min(550, visibleFrame.width - 40)
         let height = min(500, visibleFrame.height - 60)
         return CGSize(width: width, height: height)
     }
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
 
@@ -681,14 +688,14 @@ struct SettingsView: View {
                     Label("Model", systemImage: "cpu")
                 }
                 .tag(1)
-            
+
             // Transcription Settings
             transcriptionSettings
                 .tabItem {
                     Label("Transcription", systemImage: "text.bubble")
                 }
                 .tag(2)
-            
+
             // Advanced Settings
             advancedSettings
                 .tabItem {
@@ -711,9 +718,9 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                
+
                 Spacer()
-                
+
                 Link(destination: URL(string: "https://github.com/Starmel/OpenSuperWhisper")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "star")
@@ -752,32 +759,32 @@ struct SettingsView: View {
             }
         }
     }
-    
+
     private var modelSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Speech Recognition Engine")
                     .font(.headline)
                     .foregroundColor(.primary)
-                
+
                 Picker("Engine", selection: $viewModel.selectedEngine) {
                     Text("Parakeet").tag("fluidaudio")
                     Text("Whisper").tag("whisper")
                 }
                 .pickerStyle(.segmented)
                 .padding(.bottom, 8)
-                
+
                 if viewModel.selectedEngine == "whisper" {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Whisper Model")
                             .font(.headline)
                             .foregroundColor(.primary)
-                        
+
                         Text("Download Models")
                             .font(.headline)
                             .foregroundColor(.primary)
                             .padding(.top, 8)
-                        
+
                         VStack(spacing: 12) {
                             ForEach($viewModel.downloadableModels) { $model in
                                 if SettingsDownloadableModels.isVisible(model,
@@ -787,7 +794,7 @@ struct SettingsView: View {
                                 }
                             }
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Models Directory:")
@@ -816,18 +823,18 @@ struct SettingsView: View {
                         Text("Parakeet Model")
                             .font(.headline)
                             .foregroundColor(.primary)
-                        
+
                         Text("Download Models")
                             .font(.headline)
                             .foregroundColor(.primary)
                             .padding(.top, 8)
-                        
+
                         VStack(spacing: 12) {
                             ForEach($viewModel.downloadableFluidAudioModels) { $model in
                                 FluidAudioModelDownloadItemView(model: $model, viewModel: viewModel)
                             }
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Models Directory:")
@@ -862,7 +869,7 @@ struct SettingsView: View {
         }
         .padding()
     }
-    
+
     private var transcriptionSettings: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -871,11 +878,11 @@ struct SettingsView: View {
                     Text("Language Settings")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Transcription Language")
                             .font(.subheadline)
-                        
+
                         Picker("Language", selection: $viewModel.selectedLanguage) {
                             ForEach(viewModel.supportedLanguages, id: \.self) { code in
                                 Text(LanguageUtil.languageNames[code] ?? code)
@@ -888,7 +895,7 @@ struct SettingsView: View {
                         .background(Color(.controlBackgroundColor))
                         .cornerRadius(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        
+
                         if Settings.asianLanguages.contains(viewModel.selectedLanguage) {
                             HStack {
                                 Text("Use Asian Autocorrect")
@@ -906,13 +913,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 // Output Options
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Output Options")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("Show Timestamps")
@@ -922,7 +929,7 @@ struct SettingsView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                         }
-                        
+
                         HStack {
                             Text("Suppress Blank Audio")
                                 .font(.subheadline)
@@ -931,7 +938,7 @@ struct SettingsView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                         }
-                        
+
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Add Space After Sentence")
@@ -998,7 +1005,7 @@ struct SettingsView: View {
                     Text("Initial Prompt")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 8) {
                         TextEditor(text: $viewModel.initialPrompt)
                             .frame(height: 60)
@@ -1009,7 +1016,7 @@ struct SettingsView: View {
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                             )
-                        
+
                         Text("Optional text to guide the model's transcription")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -1019,13 +1026,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 // Transcriptions Directory
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Transcriptions Directory")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Directory:")
@@ -1040,7 +1047,7 @@ struct SettingsView: View {
                             .buttonStyle(.borderless)
                             .help("Open transcriptions directory")
                         }
-                        
+
                         Text(Recording.recordingsDirectory.path)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -1055,7 +1062,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 RecordingStorageSettingsView()
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1065,7 +1072,7 @@ struct SettingsView: View {
             .padding()
         }
     }
-    
+
     private var advancedSettings: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -1074,7 +1081,7 @@ struct SettingsView: View {
                     Text("Decoding Strategy")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("Use Beam Search")
@@ -1085,7 +1092,7 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .help("Beam search can provide better results but is slower")
                         }
-                        
+
                         if viewModel.useBeamSearch {
                             HStack {
                                 Text("Beam Size:")
@@ -1102,13 +1109,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 // Model Parameters
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Model Parameters")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 14) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -1119,11 +1126,11 @@ struct SettingsView: View {
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
-                            
+
                             Slider(value: $viewModel.temperature, in: 0.0...1.0, step: 0.1)
                                 .help("Higher values make the output more random")
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text("No Speech Threshold:")
@@ -1133,7 +1140,7 @@ struct SettingsView: View {
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
-                            
+
                             Slider(value: $viewModel.noSpeechThreshold, in: 0.0...1.0, step: 0.1)
                                 .help("Threshold for detecting speech vs. silence")
                         }
@@ -1143,13 +1150,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 // Debug Options
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Debug Options")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     HStack {
                         Text("Debug Mode")
                             .font(.subheadline)
@@ -1168,7 +1175,7 @@ struct SettingsView: View {
             .padding()
         }
     }
-    
+
     private enum TriggerMode: Hashable {
         case keyCombo
         case modifier
@@ -1182,7 +1189,7 @@ struct SettingsView: View {
                 Text(message)
                     .font(.caption)
                     .foregroundColor(.orange)
-                
+
                 Button("Grant Permission") {
                     grantAction()
                 }
@@ -1198,7 +1205,7 @@ struct SettingsView: View {
         if viewModel.modifierOnlyHotkey != .none { return .modifier }
         return .keyCombo
     }
-    
+
     private var shortcutSettings: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -1207,7 +1214,7 @@ struct SettingsView: View {
                     Text("Recording Trigger")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 16) {
                         Picker("", selection: Binding(
                             get: { triggerMode },
@@ -1344,13 +1351,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-                
+
                 // Recording Behavior
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Recording Behavior")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -1365,7 +1372,7 @@ struct SettingsView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                         }
-                        
+
                         HStack {
                             Text("Play sound when recording starts")
                                 .font(.subheadline)
@@ -1375,7 +1382,17 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .help("Play a notification sound when recording begins")
                         }
-                        
+
+                        HStack {
+                            Text("Play sound when recording stops")
+                                .font(.subheadline)
+                            Spacer()
+                            Toggle("", isOn: $viewModel.playSoundOnRecordStop)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                                .help("Play a sound when recording ends")
+                        }
+
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Cancel without confirmation")
@@ -1532,22 +1549,22 @@ struct FluidAudioModelDownloadItemView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @State private var showError = false
     @State private var errorMessage = ""
-    
+
     var isSelected: Bool {
         viewModel.fluidAudioModelVersion == model.version
     }
-    
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.name)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                
+
                 Text(model.description)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                     ProgressView(value: model.downloadProgress)
                         .progressViewStyle(LinearProgressViewStyle())
@@ -1555,9 +1572,9 @@ struct FluidAudioModelDownloadItemView: View {
                         .padding(.top, 4)
                 }
             }
-            
+
             Spacer()
-            
+
             if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                 Button("Cancel") {
                     viewModel.cancelDownload()
@@ -1583,7 +1600,7 @@ struct FluidAudioModelDownloadItemView: View {
                     Text(model.sizeString)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    
+
                     Button(action: {
                         Task {
                             do {
@@ -1759,7 +1776,7 @@ struct ModelDownloadItemView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @State private var showError = false
     @State private var errorMessage = ""
-    
+
     var isSelected: Bool {
         if let selectedURL = viewModel.selectedModelURL {
             let filename = model.filename
@@ -1767,7 +1784,7 @@ struct ModelDownloadItemView: View {
         }
         return false
     }
-    
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -1784,7 +1801,7 @@ struct ModelDownloadItemView: View {
                             .help("View on Hugging Face")
                     }
                 }
-                
+
                 Text(model.description)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -1796,9 +1813,9 @@ struct ModelDownloadItemView: View {
                         .padding(.top, 4)
                 }
             }
-            
+
             Spacer()
-            
+
             if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
                 Button("Cancel") {
                     viewModel.cancelDownload()
@@ -1825,7 +1842,7 @@ struct ModelDownloadItemView: View {
                     Text(model.sizeString)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    
+
                     Button(action: {
                         Task {
                             do {
