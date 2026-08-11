@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# osw — OpenSuperWhisper CLI config tool
+# Usage: osw <command> [args]
+
+set -euo pipefail
+
+BUNDLE_ID="ru.starmel.OpenSuperWhisper"
+APP_PATH="/Applications/OpenSuperWhisper.app"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+_read()  { defaults read "$BUNDLE_ID" "$1" 2>/dev/null || echo "(unset)"; }
+_write() { defaults write "$BUNDLE_ID" "$1" "$2"; }
+_writeb() { defaults write "$BUNDLE_ID" "$1" -bool "$2"; }
+
+_restart() {
+  osascript -e 'tell application "OpenSuperWhisper" to quit' 2>/dev/null || true
+  sleep 0.5
+  open "$APP_PATH"
+  echo "restarted OpenSuperWhisper"
+}
+
+cmd_status() {
+  echo "OpenSuperWhisper config ($(defaults export "$BUNDLE_ID" - 2>/dev/null | grep -c '<key>' || echo '?') keys)"
+  echo
+  printf "  %-26s %s\n" "engine:"           "$(_read selectedEngine)"
+  printf "  %-26s %s\n" "language:"         "$(_read whisperLanguage)"
+  printf "  %-26s %s\n" "fluid model:"      "$(_read fluidAudioModelVersion)"
+  printf "  %-26s %s\n" "sound on start:"   "$(_read playSoundOnRecordStart)"
+  printf "  %-26s %s\n" "debug mode:"       "$(_read debugMode)"
+  printf "  %-26s %s\n" "modifier hotkey:"  "$(_read modifierOnlyHotkey)"
+  echo
+  # Decode microphone JSON
+  python3 - << 'PYEOF' 2>/dev/null || true
+import subprocess, json
+result = subprocess.run(
+    ['defaults', 'export', 'ru.starmel.OpenSuperWhisper', '-'],
+    capture_output=True
+)
+import plistlib
+prefs = plistlib.loads(result.stdout)
+mic = prefs.get('selectedMicrophoneData')
+if mic:
+    m = json.loads(mic)
+    print(f"  microphone:                {m['name']} ({m['id']})")
+else:
+    print("  microphone:                (unset)")
+PYEOF
+}
+
+cmd_engine() {
+  local val="${1:-}"
+  [[ -z "$val" ]] && { echo "current: $(_read selectedEngine)"; echo "options: fluidaudio, whisper"; return; }
+  [[ "$val" == "fluidaudio" || "$val" == "whisper" ]] || die "unknown engine '$val' — use fluidaudio or whisper"
+  _write selectedEngine "$val"
+  echo "engine → $val (restart to apply)"
+}
+
+cmd_lang() {
+  local val="${1:-}"
+  [[ -z "$val" ]] && { echo "current: $(_read whisperLanguage)"; return; }
+  _write whisperLanguage "$val"
+  echo "language → $val"
+}
+
+cmd_model() {
+  local val="${1:-}"
+  [[ -z "$val" ]] && { echo "current: $(_read fluidAudioModelVersion)"; return; }
+  _write fluidAudioModelVersion "$val"
+  echo "fluid model → $val (restart to apply)"
+}
+
+cmd_sound() {
+  local val="${1:-}"
+  [[ -z "$val" ]] && { echo "current: $(_read playSoundOnRecordStart)"; return; }
+  case "$val" in
+    on|1|true)   _writeb playSoundOnRecordStart true;  echo "sound on start → on";;
+    off|0|false) _writeb playSoundOnRecordStart false; echo "sound on start → off";;
+    *) die "use on or off";;
+  esac
+}
+
+cmd_debug() {
+  local val="${1:-}"
+  [[ -z "$val" ]] && { echo "current: $(_read debugMode)"; return; }
+  case "$val" in
+    on|1|true)   _writeb debugMode true;  echo "debug → on";;
+    off|0|false) _writeb debugMode false; echo "debug → off";;
+    *) die "use on or off";;
+  esac
+}
+
+cmd_mic() {
+  local val="${1:-}"
+  if [[ -z "$val" ]]; then
+    echo "available input devices:"
+    swift - << 'SWEOF' 2>/dev/null
+import AVFoundation
+let devices = AVCaptureDevice.devices(for: .audio)
+for (i, d) in devices.enumerated() {
+    print("  \(i+1). \(d.localizedName)  (\(d.uniqueID))")
+}
+SWEOF
+    echo
+    echo "current:"
+    python3 - << 'PYEOF' 2>/dev/null
+import subprocess, json, plistlib
+prefs = plistlib.loads(subprocess.run(['defaults','export','ru.starmel.OpenSuperWhisper','-'],capture_output=True).stdout)
+mic = prefs.get('selectedMicrophoneData')
+print(" ", json.loads(mic)['name'] if mic else '(unset)')
+PYEOF
+    echo
+    echo "usage: osw mic <name or uid substring>"
+    return
+  fi
+
+  # Match by name or UID substring using swift
+  local result
+  result=$(swift - "$val" << 'SWEOF' 2>/dev/null
+import AVFoundation
+import Foundation
+let query = CommandLine.arguments[1].lowercased()
+let devices = AVCaptureDevice.devices(for: .audio)
+let matches = devices.filter { d in
+    d.localizedName.lowercased().contains(query) || d.uniqueID.lowercased().contains(query)
+}
+if matches.count == 1 {
+    let d = matches[0]
+    let info: [String: Any] = [
+        "name": d.localizedName,
+        "manufacturer": d.manufacturer,
+        "isBuiltIn": d.position == .unspecified && d.manufacturer.contains("Apple"),
+        "id": d.uniqueID
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: info)
+    print(String(data: data, encoding: .utf8)!)
+} else if matches.count > 1 {
+    print("MULTI_MATCH")
+    for d in matches {
+        print("  \(d.localizedName)  (\(d.uniqueID))")
+    }
+} else {
+    print("NO_MATCH")
+}
+SWEOF
+)
+
+  [[ "$result" == "NO_MATCH" || -z "$result" ]] && die "no device matching '$val' — run 'osw mic' to list"
+  if [[ "$result" == MULTI_MATCH* ]]; then
+    echo "error: multiple devices match '$val' — narrow the query to exactly one:" >&2
+    echo "$result" | tail -n +2 >&2
+    exit 1
+  fi
+
+  # Write JSON blob as data to UserDefaults
+  python3 - "$result" << 'PYEOF'
+import sys, subprocess, json, plistlib
+info = json.loads(sys.argv[1])
+data = json.dumps(info).encode()
+# Write as Data type
+subprocess.run([
+    'defaults', 'write', 'ru.starmel.OpenSuperWhisper',
+    'selectedMicrophoneData', '-data',
+    data.hex()
+], check=True)
+name = info['name']
+print(f"microphone → {name} (saved)")
+PYEOF
+
+  # Post DistributedNotificationCenter signal to trigger live reload.
+  # A failed post must fail the command — do not suppress it — and we only
+  # claim the reload was requested once the post itself succeeds. We cannot
+  # claim "applied live" because the app does not acknowledge the reload.
+  if swift - << 'SWEOF'
+import Foundation
+DistributedNotificationCenter.default().postNotificationName(
+    Notification.Name("ru.starmel.OpenSuperWhisper.reloadMicrophone"),
+    object: nil, userInfo: nil, deliverImmediately: true)
+SWEOF
+  then
+    echo "live reload requested"
+  else
+    die "preference saved, but failed to post live-reload notification — restart the app to apply"
+  fi
+}
+
+cmd_restart() { _restart; }
+
+cmd_help() {
+  cat << 'EOF'
+osw — OpenSuperWhisper CLI
+
+Commands:
+  status                  show current config
+  engine [fluidaudio|whisper]   get or set transcription engine
+  lang [code]             get or set whisper language (e.g. en, fr, auto)
+  model [version]         get or set fluid audio model version (e.g. v3)
+  sound [on|off]          get or set sound on record start
+  debug [on|off]          get or set debug mode
+  mic [name-or-uid]       list devices or switch microphone
+  restart                 quit and relaunch OpenSuperWhisper
+  help                    this message
+EOF
+}
+
+[[ $# -eq 0 ]] && { cmd_status; exit 0; }
+
+cmd="$1"; shift || true
+case "$cmd" in
+  status)  cmd_status "$@";;
+  engine)  cmd_engine "$@";;
+  lang)    cmd_lang "$@";;
+  model)   cmd_model "$@";;
+  sound)   cmd_sound "$@";;
+  debug)   cmd_debug "$@";;
+  mic)     cmd_mic "$@";;
+  restart) cmd_restart;;
+  help|-h|--help) cmd_help;;
+  *) die "unknown command '$cmd' — run 'osw help'";;
+esac
