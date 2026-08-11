@@ -121,10 +121,11 @@ import AVFoundation
 import Foundation
 let query = CommandLine.arguments[1].lowercased()
 let devices = AVCaptureDevice.devices(for: .audio)
-let match = devices.first { d in
+let matches = devices.filter { d in
     d.localizedName.lowercased().contains(query) || d.uniqueID.lowercased().contains(query)
 }
-if let d = match {
+if matches.count == 1 {
+    let d = matches[0]
     let info: [String: Any] = [
         "name": d.localizedName,
         "manufacturer": d.manufacturer,
@@ -133,6 +134,11 @@ if let d = match {
     ]
     let data = try! JSONSerialization.data(withJSONObject: info)
     print(String(data: data, encoding: .utf8)!)
+} else if matches.count > 1 {
+    print("MULTI_MATCH")
+    for d in matches {
+        print("  \(d.localizedName)  (\(d.uniqueID))")
+    }
 } else {
     print("NO_MATCH")
 }
@@ -140,6 +146,11 @@ SWEOF
 )
 
   [[ "$result" == "NO_MATCH" || -z "$result" ]] && die "no device matching '$val' — run 'osw mic' to list"
+  if [[ "$result" == MULTI_MATCH* ]]; then
+    echo "error: multiple devices match '$val' — narrow the query to exactly one:" >&2
+    echo "$result" | tail -n +2 >&2
+    exit 1
+  fi
 
   # Write JSON blob as data to UserDefaults
   python3 - "$result" << 'PYEOF'
@@ -153,16 +164,24 @@ subprocess.run([
     data.hex()
 ], check=True)
 name = info['name']
-print(f"microphone → {name} (applied live)")
+print(f"microphone → {name} (saved)")
 PYEOF
 
-  # Post DistributedNotificationCenter signal to trigger live reload
-  swift - << 'SWEOF' 2>/dev/null || true
+  # Post DistributedNotificationCenter signal to trigger live reload.
+  # A failed post must fail the command — do not suppress it — and we only
+  # claim the reload was requested once the post itself succeeds. We cannot
+  # claim "applied live" because the app does not acknowledge the reload.
+  if swift - << 'SWEOF'
 import Foundation
 DistributedNotificationCenter.default().postNotificationName(
     Notification.Name("ru.starmel.OpenSuperWhisper.reloadMicrophone"),
     object: nil, userInfo: nil, deliverImmediately: true)
 SWEOF
+  then
+    echo "live reload requested"
+  else
+    die "preference saved, but failed to post live-reload notification — restart the app to apply"
+  fi
 }
 
 cmd_restart() { _restart; }
